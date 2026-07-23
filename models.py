@@ -89,4 +89,5 @@ class WatchlistEntry(db.Model):
             "film_id": self.film_id,
             "date_added": self.date_added.isoformat(),
             "public": self.public,
+        
         }
