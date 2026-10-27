@@ -5,9 +5,9 @@ I used AI to explain the existing Flask, SQLAlchemy, service, route, and test co
 
 ## Comment 1 — Rename
 **What I did:**
-I renamed save_to_watchlist() to add_to_watchlist() to match the existing add_to_collection() naming pattern. I checked the watchlist route and service call sites to make sure they use the new name.
+I renamed save_to_watchlist() to add_to_watchlist() to match the existing add_to_collection() naming pattern. There were two call sites: the function definition in services/watchlist_service.py and the import plus call in routes/watchlist/watchlist.py (POST /watchlist/<user_id>/add). Both now use add_to_watchlist.
 **How I verified:**
-I searched the watchlist route and service for save_to_watchlist references and confirmed the call now uses add_to_watchlist.
+I ran `grep -rn "save_to_watchlist" --include='*.py' .` across the whole repo (routes/, services/, tests/, app.py) and it returned 0 matches. The test file imports add_to_watchlist directly, so the full test suite passing confirms nothing still references the old name.
 
 ## Comment 2 — Deduplication
 **What I did:**
@@ -17,7 +17,7 @@ I ran the duplicate-entry test and confirmed the second add raises AlreadyInWatc
 
 ## Comment 3 — Missing test
 **What I did:**
-I modeled the test on the nonexistent-film collection test. It passes an ID that is not in the Film table and checks that FilmNotFoundError is raised before a database insert is attempted.
+I added test_add_to_watchlist_nonexistent_film_raises, modeled on test_add_to_collection_nonexistent_film_raises in tests/test_collection.py. It passes a well-formed UUID (00000000-0000-0000-0000-000000000000) that is not in the Film table and checks that add_to_watchlist raises FilmNotFoundError instead of a database integrity error.
 **How I verified:**
 I ran the nonexistent-film test and confirmed it passed with FilmNotFoundError.
 
@@ -41,13 +41,31 @@ I agree with the maintainer that most users want to see what they added recently
 **What conflicted:**
 The rebase had conflicts in the model, watchlist files, PR response, and test. The main issue was integer IDs versus UUID string IDs.
 **How I resolved it:**
-I kept the UUID version, the newer watchlist code, my PR response, and the test.
+I kept main's UUID version of models.py (Film.id and WatchlistEntry.film_id are String(36) UUIDs), the newer watchlist code, my PR response, and the test. I then updated the watchlist service and route so film_id is documented and handled as a UUID string instead of an int (commit: `fix: update watchlist film IDs to UUID format after main refactor`).
 **How I verified no conflict remains:**
-I removed the conflict markers, staged the files, and completed the rebase. The watchlist files also passed a Python compile check.
+I removed the conflict markers, staged the files, and completed the rebase. The history is linear (no merge commits), the watchlist files pass a Python compile check, and the full test suite passes using UUID film IDs.
+
+## Stretch — Second test
+**What I did:**
+I added test_get_watchlist_returns_newest_first, modeled on test_get_collection_returns_newest_first. It adds "Alien" five days ago and "Blade Runner" today, then checks get_watchlist returns ["Blade Runner", "Alien"].
+**Why this edge case:**
+The sort order was changed during review (Comment 5), and nothing tested it. I picked titles where alphabetical order and date order disagree, so the test fails if the query ever goes back to Film.title.asc(). I confirmed this by temporarily switching the sort back and watching the test fail.
 
 ## PR Description
 Added a watchlist feature that lets users add films and view their saved films.
 
-The service checks that a film exists and prevents the same user from adding the same film more than once. Duplicate requests return a conflict error, and invalid film IDs raise FilmNotFoundError. Watchlists are public by default to support film discovery, and films are sorted by the date they were added, newest first.
+The service checks that a film exists and prevents the same user from adding the same film more than once. Duplicate requests return a conflict error, and invalid film IDs raise FilmNotFoundError.
 
-To manually test the feature, seed the database, start the Flask app, then use a real user ID and film ID. Send POST /watchlist/<user_id>/add once and confirm a 201 response. Send the same request again and confirm a 409 response. Send an invalid film ID and confirm a 404 response. Finally, send GET /watchlist/<user_id> and confirm the films are returned newest first. Automated tests cover the successful add, duplicate add, and nonexistent film cases.
+**Design decisions:**
+- **Default visibility: public.** Watchlists are public by default so other users can discover films through each other's lists.
+- **Sort order: date added, newest first.** Users usually open their watchlist to find what they saved most recently, so new additions appear at the top instead of being buried alphabetically.
+
+**How to test manually:**
+1. Run `python seed.py`, then start the app with `python app.py` (http://localhost:5000).
+2. Pick a real user ID and two film IDs from the seeded database.
+3. `POST /watchlist/<user_id>/add` with body `{"film_id": "<film_id>"}` and confirm a 201 response.
+4. Send the same request again and confirm a 409 response.
+5. Send `{"film_id": "00000000-0000-0000-0000-000000000000"}` and confirm a 404 response.
+6. Add the second film, then `GET /watchlist/<user_id>` and confirm the second film is listed first.
+
+Automated tests (`python -m pytest -q`) cover the successful add, the duplicate add, a nonexistent film, and newest-first sorting.
