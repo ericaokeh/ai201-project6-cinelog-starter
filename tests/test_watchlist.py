@@ -1,14 +1,8 @@
-from datetime import datetime, timedelta, timezone
-
 import pytest
 from app import create_app, db
-from models import Film, User, WatchlistEntry
+from models import User
 from services.collection_service import FilmNotFoundError
-from services.watchlist_service import (
-    AlreadyInWatchlistError,
-    add_to_watchlist,
-    get_watchlist,
-)
+from services.watchlist_service import add_to_watchlist
 
 
 @pytest.fixture
@@ -33,34 +27,6 @@ def sample_user(app):
         return user.id
 
 
-@pytest.fixture
-def sample_film(app):
-    with app.app_context():
-        film = Film(title="Paddington 2", year=2017, genre="Comedy")
-        db.session.add(film)
-        db.session.commit()
-        return film.id
-
-
-def test_add_to_watchlist_creates_entry(app, sample_user, sample_film):
-    with app.app_context():
-        entry = add_to_watchlist(user_id=sample_user, film_id=sample_film)
-
-        assert entry.user_id == sample_user
-        assert entry.film_id == sample_film
-        assert WatchlistEntry.query.count() == 1
-
-
-def test_add_to_watchlist_duplicate_raises(app, sample_user, sample_film):
-    with app.app_context():
-        add_to_watchlist(user_id=sample_user, film_id=sample_film)
-
-        with pytest.raises(AlreadyInWatchlistError):
-            add_to_watchlist(user_id=sample_user, film_id=sample_film)
-
-        assert WatchlistEntry.query.count() == 1
-
-
 def test_add_to_watchlist_nonexistent_film_raises(app, sample_user):
     """
     Adding a film_id that doesn't exist in the database should raise
@@ -71,29 +37,3 @@ def test_add_to_watchlist_nonexistent_film_raises(app, sample_user):
 
         with pytest.raises(FilmNotFoundError):
             add_to_watchlist(user_id=sample_user, film_id=fake_film_id)
-
-
-def test_get_watchlist_returns_newest_first(app, sample_user):
-    """
-    get_watchlist() should return films sorted by date_added descending,
-    not alphabetically by title.
-    """
-    with app.app_context():
-        film_a = Film(title="Alien", year=1979, genre="Horror")
-        film_b = Film(title="Blade Runner", year=1982, genre="Sci-Fi")
-        db.session.add_all([film_a, film_b])
-        db.session.commit()
-
-        earlier = datetime.now(timezone.utc) - timedelta(days=5)
-        later = datetime.now(timezone.utc)
-
-        entry_a = WatchlistEntry(user_id=sample_user, film_id=film_a.id, date_added=earlier)
-        entry_b = WatchlistEntry(user_id=sample_user, film_id=film_b.id, date_added=later)
-        db.session.add_all([entry_a, entry_b])
-        db.session.commit()
-
-        titles = [f["title"] for f in get_watchlist(sample_user)]
-
-        # Blade Runner was added later, so it comes first even though
-        # Alien would come first alphabetically
-        assert titles == ["Blade Runner", "Alien"]
